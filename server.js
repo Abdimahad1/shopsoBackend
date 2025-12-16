@@ -8,7 +8,7 @@ import authRoutes from "./routes/authRoutes.js";
 import productRoutes from "./routes/shop/productRoutes.js";
 import categoryRoutes from "./routes/shop/categoryRoutes.js";
 import discountRoutes from "./routes/shop/discountRoutes.js";
-import storeRoutes from "./routes/shop/storeRoutes.js"; // NEW
+import storeRoutes from "./routes/shop/storeRoutes.js";
 import fs from "fs";
 
 dotenv.config();
@@ -19,91 +19,127 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 
-// Middlewares
-app.use(express.json());
-app.use(cors());
+// ================================
+// CORS CONFIGURATION FOR DEPLOYMENT
+// ================================
+
+// List of allowed origins
+const allowedOrigins = [
+  'https://shopso.onrender.com',  // Your frontend
+  'http://localhost:5173',        // Local Vite dev server
+  'http://localhost:3000',        // Local React dev server
+  'http://localhost:5174',        // Alternate local port
+];
+
+// CORS options
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps, curl, postman)
+    if (!origin) return callback(null, true);
+    
+    // Check if origin is in allowed list
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    } else {
+      console.log(`Blocked by CORS: ${origin}`);
+      return callback(new Error('Not allowed by CORS'), false);
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  exposedHeaders: ['Content-Range', 'X-Content-Range'],
+  maxAge: 86400, // 24 hours
+};
+
+// Enable CORS for all routes with detailed logging in development
+if (process.env.NODE_ENV === 'production') {
+  app.use(cors(corsOptions));
+} else {
+  // In development, allow all origins for easier testing
+  app.use(cors({
+    origin: '*',
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  }));
+  console.log('⚠️  Development mode: CORS set to allow all origins');
+}
+
+// Handle preflight requests for all routes
+app.options(/.*/, (req, res) => {
+  res.header(
+    'Access-Control-Allow-Origin',
+    process.env.NODE_ENV === 'production'
+      ? 'https://shopso.onrender.com'
+      : '*'
+  );
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Max-Age', '86400');
+  res.sendStatus(204);
+});
+
+
+// Log CORS requests in development
+if (process.env.NODE_ENV === 'development') {
+  app.use((req, res, next) => {
+    console.log(`🌐 ${req.method} ${req.path} - Origin: ${req.headers.origin || 'No origin'}`);
+    next();
+  });
+}
 
 // ================================
-// SINGLE UPLOADS DIRECTORY SETUP
+// MIDDLEWARE
+// ================================
+
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+// ================================
+// UPLOADS DIRECTORY SETUP
 // ================================
 
 // Create unified uploads directory
 const UPLOADS_DIR = path.join(__dirname, "uploads");
 const PRODUCTS_UPLOADS = path.join(UPLOADS_DIR, "products");
 const DISCOUNTS_UPLOADS = path.join(UPLOADS_DIR, "discounts");
-const STORES_UPLOADS = path.join(UPLOADS_DIR, "stores"); // NEW
-const LOGOS_UPLOADS = path.join(STORES_UPLOADS, "logos"); // NEW
-const BANNERS_UPLOADS = path.join(STORES_UPLOADS, "banners"); // NEW
+const STORES_UPLOADS = path.join(UPLOADS_DIR, "stores");
+const LOGOS_UPLOADS = path.join(STORES_UPLOADS, "logos");
+const BANNERS_UPLOADS = path.join(STORES_UPLOADS, "banners");
 
 // Create directories if they don't exist
 const createUploadsDirectories = () => {
-  if (!fs.existsSync(UPLOADS_DIR)) {
-    fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-    console.log("📁 Created main uploads directory:", UPLOADS_DIR);
-  }
-  
-  if (!fs.existsSync(PRODUCTS_UPLOADS)) {
-    fs.mkdirSync(PRODUCTS_UPLOADS, { recursive: true });
-    console.log("📁 Created products uploads directory:", PRODUCTS_UPLOADS);
-  }
-  
-  if (!fs.existsSync(DISCOUNTS_UPLOADS)) {
-    fs.mkdirSync(DISCOUNTS_UPLOADS, { recursive: true });
-    console.log("📁 Created discounts uploads directory:", DISCOUNTS_UPLOADS);
-  }
-  
-  // NEW: Create store directories
-  if (!fs.existsSync(STORES_UPLOADS)) {
-    fs.mkdirSync(STORES_UPLOADS, { recursive: true });
-    console.log("📁 Created stores uploads directory:", STORES_UPLOADS);
-  }
-  
-  if (!fs.existsSync(LOGOS_UPLOADS)) {
-    fs.mkdirSync(LOGOS_UPLOADS, { recursive: true });
-    console.log("📁 Created store logos directory:", LOGOS_UPLOADS);
-  }
-  
-  if (!fs.existsSync(BANNERS_UPLOADS)) {
-    fs.mkdirSync(BANNERS_UPLOADS, { recursive: true });
-    console.log("📁 Created store banners directory:", BANNERS_UPLOADS);
+  try {
+    const directories = [
+      UPLOADS_DIR,
+      PRODUCTS_UPLOADS,
+      DISCOUNTS_UPLOADS,
+      STORES_UPLOADS,
+      LOGOS_UPLOADS,
+      BANNERS_UPLOADS
+    ];
+    
+    directories.forEach(dir => {
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+        console.log(`✅ Created directory: ${dir}`);
+      }
+    });
+    
+    console.log('📁 All upload directories ready');
+  } catch (error) {
+    console.error('❌ Failed to create directories:', error.message);
   }
 };
 
 createUploadsDirectories();
 
 // ================================
-// STATIC FILE SERVING
+// STATIC FILE SERVING WITH CORS
 // ================================
 
-// Serve product images from single uploads directory
-app.use("/uploads/products", express.static(PRODUCTS_UPLOADS, {
-  setHeaders: (res, filePath) => {
-    setImageHeaders(res, filePath);
-  }
-}));
-
-// Serve discount images from single uploads directory
-app.use("/uploads/discounts", express.static(DISCOUNTS_UPLOADS, {
-  setHeaders: (res, filePath) => {
-    setImageHeaders(res, filePath);
-  }
-}));
-
-// NEW: Serve store logos
-app.use("/uploads/stores/logos", express.static(LOGOS_UPLOADS, {
-  setHeaders: (res, filePath) => {
-    setImageHeaders(res, filePath);
-  }
-}));
-
-// NEW: Serve store banners
-app.use("/uploads/stores/banners", express.static(BANNERS_UPLOADS, {
-  setHeaders: (res, filePath) => {
-    setImageHeaders(res, filePath);
-  }
-}));
-
-// Helper function to set image headers
+// Helper function to set image headers with CORS
 const setImageHeaders = (res, filePath) => {
   const ext = path.extname(filePath).toLowerCase();
   
@@ -126,13 +162,62 @@ const setImageHeaders = (res, filePath) => {
       res.setHeader('Content-Type', 'image/jpeg');
       break;
     default:
-      // For unknown types, let Express handle it
+      res.setHeader('Content-Type', 'application/octet-stream');
       break;
   }
   
-  // Cache control
+  // Cache control for images
   res.setHeader('Cache-Control', 'public, max-age=86400'); // 1 day
+  res.setHeader('Access-Control-Allow-Origin', process.env.NODE_ENV === 'production' ? 'https://shopso.onrender.com' : '*');
+  res.setHeader('Access-Control-Allow-Credentials', 'true');
 };
+
+// Serve static files with CORS headers
+const staticOptions = {
+  setHeaders: (res, filePath) => {
+    setImageHeaders(res, filePath);
+  }
+};
+
+app.use("/uploads/products", express.static(PRODUCTS_UPLOADS, staticOptions));
+app.use("/uploads/discounts", express.static(DISCOUNTS_UPLOADS, staticOptions));
+app.use("/uploads/stores/logos", express.static(LOGOS_UPLOADS, staticOptions));
+app.use("/uploads/stores/banners", express.static(BANNERS_UPLOADS, staticOptions));
+
+// ================================
+// HEALTH CHECK AND ROOT ENDPOINT
+// ================================
+
+app.get("/", (req, res) => {
+  res.json({
+    success: true,
+    message: "🛍️ ShopSo Backend API is running",
+    version: "1.0.0",
+    environment: process.env.NODE_ENV || 'development',
+    frontend_url: "https://shopso.onrender.com",
+    backend_url: "https://shopsobackend.onrender.com",
+    status: "operational",
+    timestamp: new Date().toISOString(),
+    endpoints: {
+      auth: "/api/auth",
+      products: "/api/products",
+      categories: "/api/categories",
+      discounts: "/api/discounts",
+      stores: "/api/stores"
+    }
+  });
+});
+
+app.get("/health", (req, res) => {
+  res.json({
+    success: true,
+    message: "✅ Server is healthy",
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+    memory: process.memoryUsage(),
+    node_version: process.version
+  });
+});
 
 // ================================
 // DEBUG ROUTES (Development only)
@@ -203,14 +288,14 @@ if (process.env.NODE_ENV === "development") {
     debugImageFile(res, filename, filePath, "discounts");
   });
 
-  // NEW: Debug route for store logos
+  // Debug route for store logos
   app.get("/debug/image/stores/logos/:filename", (req, res) => {
     const filename = req.params.filename;
     const filePath = path.join(LOGOS_UPLOADS, filename);
     debugImageFile(res, filename, filePath, "store logos");
   });
 
-  // NEW: Debug route for store banners
+  // Debug route for store banners
   app.get("/debug/image/stores/banners/:filename", (req, res) => {
     const filename = req.params.filename;
     const filePath = path.join(BANNERS_UPLOADS, filename);
@@ -240,6 +325,7 @@ if (process.env.NODE_ENV === "development") {
         else if (ext === '.jpg' || ext === '.jpeg') contentType = 'image/jpeg';
         
         res.setHeader('Content-Type', contentType);
+        res.setHeader('Access-Control-Allow-Origin', '*');
         res.sendFile(filePath);
       } catch (error) {
         console.log("  ❌ Error reading file:", error.message);
@@ -268,7 +354,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/products", productRoutes);
 app.use("/api/categories", categoryRoutes);
 app.use("/api/discounts", discountRoutes);
-app.use("/api/stores", storeRoutes); // NEW
+app.use("/api/stores", storeRoutes);
 
 // ================================
 // ERROR HANDLING
@@ -276,7 +362,17 @@ app.use("/api/stores", storeRoutes); // NEW
 
 // Error handling middleware
 app.use((err, req, res, next) => {
-  console.error("Global Error Handler:", err);
+  console.error("🔥 Global Error Handler:", err);
+
+  // CORS errors
+  if (err.message === 'Not allowed by CORS') {
+    return res.status(403).json({
+      success: false,
+      message: "CORS policy: Origin not allowed",
+      allowedOrigins: allowedOrigins,
+      yourOrigin: req.headers.origin
+    });
+  }
 
   // Multer errors
   if (err.name === "MulterError") {
@@ -338,10 +434,11 @@ app.use((err, req, res, next) => {
   }
 
   // Default error
-  res.status(500).json({
+  const statusCode = err.statusCode || 500;
+  res.status(statusCode).json({
     success: false,
-    message: "Internal server error",
-    error: process.env.NODE_ENV === "development" ? err.message : undefined,
+    message: err.message || "Internal server error",
+    ...(process.env.NODE_ENV === "development" && { stack: err.stack }),
   });
 });
 
@@ -350,6 +447,9 @@ app.use((req, res) => {
   res.status(404).json({
     success: false,
     message: "API endpoint not found",
+    path: req.path,
+    method: req.method,
+    timestamp: new Date().toISOString()
   });
 });
 
@@ -359,16 +459,37 @@ app.use((req, res) => {
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on PORT ${PORT}`);
-  console.log(`📁 Main uploads directory: ${UPLOADS_DIR}`);
-  console.log(`📁 Products images: ${PRODUCTS_UPLOADS}`);
-  console.log(`📁 Discounts images: ${DISCOUNTS_UPLOADS}`);
-  console.log(`📁 Store logos: ${LOGOS_UPLOADS}`);
-  console.log(`📁 Store banners: ${BANNERS_UPLOADS}`);
-  console.log(`🌐 Product images URL: http://localhost:${PORT}/uploads/products/`);
-  console.log(`🌐 Discount images URL: http://localhost:${PORT}/uploads/discounts/`);
-  console.log(`🌐 Store logos URL: http://localhost:${PORT}/uploads/stores/logos/`);
-  console.log(`🌐 Store banners URL: http://localhost:${PORT}/uploads/stores/banners/`);
+  console.log(`
+  ┌─────────────────────────────────────────────┐
+  │                                             │
+  │   🛍️  ShopSo Backend Server Started        │
+  │                                             │
+  └─────────────────────────────────────────────┘
+  
+  📊 Server Information:
+     Port: ${PORT}
+     Environment: ${process.env.NODE_ENV || 'development'}
+     Frontend URL: https://shopso.onrender.com
+     Backend URL: https://shopsobackend.onrender.com
+  
+  📁 Uploads Directory: ${UPLOADS_DIR}
+  
+  🌐 API Endpoints:
+     Base URL: http://localhost:${PORT}/api
+     Auth: http://localhost:${PORT}/api/auth
+     Products: http://localhost:${PORT}/api/products
+     Categories: http://localhost:${PORT}/api/categories
+     Discounts: http://localhost:${PORT}/api/discounts
+     Stores: http://localhost:${PORT}/api/stores
+  
+  📸 Image URLs (Production):
+     Products: https://shopsobackend.onrender.com/uploads/products/
+     Discounts: https://shopsobackend.onrender.com/uploads/discounts/
+     Store Logos: https://shopsobackend.onrender.com/uploads/stores/logos/
+     Store Banners: https://shopsobackend.onrender.com/uploads/stores/banners/
+  
+  ✅ Server is ready to accept connections!
+  `);
   
   // Verify all directories exist
   createUploadsDirectories();
